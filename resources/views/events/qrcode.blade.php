@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('content')
+
     <div class="container">
         <h1>QR Code for {{ $event->title }}</h1>
         <div class="text-center">
@@ -13,4 +13,4 @@
             </p>
         </div>
     </div>
-@endsection
+

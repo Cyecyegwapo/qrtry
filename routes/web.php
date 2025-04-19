@@ -36,7 +36,8 @@ Route::middleware(['auth'])->group(function () {
     // Event Management Routes
     Route::get('/events', [EventController::class, 'index'])->name('events.index');
     Route::get('/events/create', [EventController::class, 'create'])->name('events.create')->middleware('admin'); // Protect with admin middleware
-    Route::post('/events', [EventController::class, 'store'])->name('events.store')->middleware('admin'); // Protect with admin middleware
+    Route::post('/events', [EventController::class, 'store'])->name('events.store')->middleware('admin');
+    Route::get('/events/code', [EventController::class, 'create'])->name('events.code')->middleware('user');  // Protect with admin middleware
     Route::get('/events/{event}', [EventController::class, 'show'])->name('events.show');
     Route::get('/events/{event}/edit', [EventController::class, 'edit'])->name('events.edit')->middleware('admin'); // Protect with admin middleware
     Route::put('/events/{event}', [EventController::class, 'update'])->name('events.update')->middleware('admin'); // Protect with admin middleware

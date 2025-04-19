@@ -14,7 +14,7 @@
     </div>
 
 </x-app-layout>
-@section('content')
+
     <div class="container">
         <h1>Events</h1>
         <a href="{{ route('events.create') }}" class="btn btn-primary mb-3">Create Event</a> 
@@ -65,4 +65,4 @@
             </div>
         </div>
     </div>
-@endsection
+
