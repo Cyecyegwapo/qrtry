@@ -49,6 +49,7 @@ class EventObserver
                 // a new record in the 'event_qrcodes' table, automatically setting the event_id.
                 $newQrCodeRecord = $event->qrcode()->create([
                     'svg_data' => $qrCodeSvg, // The column name in event_qrcodes table
+                    'event_title' => $event->title, // <-- The added part
                 ]);
 
                 // Check if the record creation was successful

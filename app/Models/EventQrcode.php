@@ -25,6 +25,7 @@ class EventQrcode extends Model
     protected $fillable = [
         'event_id', // Allow event_id to be filled
         'svg_data', // Allow svg_data to be filled
+        'event_title',
     ];
 
     /**
