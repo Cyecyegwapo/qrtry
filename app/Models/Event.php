@@ -29,6 +29,8 @@ class Event extends Model
         'date',
         'time',
         'location',
+        'year_level', // <-- Add new field
+        'department', // <-- Add new field
         // 'qr_code_svg', // You can comment out or remove this later if you drop the column from the 'events' table
         // Add any other event fields that need to be fillable
     ];

@@ -8,6 +8,8 @@
         <p><strong>Time:</strong> {{ $event->time }}</p>
         <p><strong>Location:</strong> {{ $event->location }}</p>
         <p><strong>Attendance Count:</strong> {{ $attendanceCount }}</p>
+        @if($event->year_level)<p><strong>Target Year Level:</strong> {{ $event->year_level }}</p>@endif
+        @if($event->department)<p><strong>Target Department:</strong> {{ $event->department }}</p>@endif
 
          @if(auth()->user()->isAdmin())
             <a href="{{ route('events.edit', $event->id) }}" class="btn btn-primary">Edit</a>

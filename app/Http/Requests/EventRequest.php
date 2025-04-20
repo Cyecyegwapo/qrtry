@@ -3,20 +3,16 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Facades\Auth; // Import Auth facade
 
 class EventRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
-     *
-     * @return bool
      */
     public function authorize(): bool
     {
-        // Only allow users who are logged in AND have the 'admin' role
-        // Assumes you have an isAdmin() method on your User model
-        return Auth::check() && Auth::user()->isAdmin();
+        // Set authorization logic if needed (e.g., check if user is admin)
+        return true; // Or use Auth::check() or specific permission check
     }
 
     /**
@@ -26,27 +22,14 @@ class EventRequest extends FormRequest
      */
     public function rules(): array
     {
-        // Define the validation rules for the event form fields
         return [
-            'title' => 'required|string|max:255', // Title is required, must be text, max 255 chars
-            'description' => 'required|string',     // Description is required, must be text
-            'date' => 'required|date|after_or_equal:today', // Date is required, must be a valid date, on or after today
-            'time' => 'required|date_format:H:i', // Time is required, must be in HH:MM format (e.g., 14:30)
-            'location' => 'required|string|max:255', // Location is required, must be text, max 255 chars
-        ];
-    }
-
-    /**
-     * Get custom messages for validator errors.
-     *
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        // Optional: Define custom error messages
-        return [
-            'date.after_or_equal' => 'The event date must be today or a future date.',
-            'time.date_format' => 'The time must be in a valid HH:MM format (e.g., 09:00 or 17:30).',
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'date' => 'required|date',
+            'time' => 'required|date_format:H:i', // Or H:i:s if seconds needed
+            'location' => 'required|string|max:255',
+            'year_level' => 'nullable|string|max:100', // Added rule (adjust max length)
+            'department' => 'nullable|string|max:100', // Added rule (adjust max length)
         ];
     }
 }
