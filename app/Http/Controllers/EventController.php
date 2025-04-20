@@ -2,205 +2,207 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\EventRequest;
-use App\Repositories\EventRepository;
-use App\Repositories\AttendanceRepository;
-use Illuminate\Http\Request;
-use App\Models\Event; // Although not directly used here, often needed
-use SimpleSoftwareIO\QrCode\Facades\QrCode; // Ensure this is imported
-use Illuminate\Support\Facades\Auth;
-use Carbon\Carbon; // Although not directly used here, often useful with dates/times
-use Illuminate\View\View; // Import View facade or use helper
-use Illuminate\Http\RedirectResponse; // Import RedirectResponse
-use Illuminate\Support\Facades\Log; // <-- Add this line to import the Log facade
+// Essential imports (add others as needed for your controller)
+use App\Http\Requests\EventRequest; // Your form request for validation
+use App\Repositories\EventRepository; // Your repository for events
+use App\Repositories\AttendanceRepository; // Your repository for attendance
+use App\Models\Event; // Your Event model
+use Illuminate\Http\RedirectResponse; // For redirects
+use Illuminate\Http\Request; // Standard request object
+use Illuminate\Support\Facades\Log; // For logging
+use Illuminate\View\View; // For returning views
+use Illuminate\Support\Facades\Auth; // For authentication
 
+// Manages actions related to events
 class EventController extends Controller
 {
-    // Repository properties
+    // Repository properties injected via constructor
     protected EventRepository $eventRepository;
     protected AttendanceRepository $attendanceRepository;
 
     /**
-     * Constructor to inject repositories.
-     *
-     * @param EventRepository $eventRepository
-     * @param AttendanceRepository $attendanceRepository
+     * Constructor to inject dependencies (repositories).
      */
     public function __construct(EventRepository $eventRepository, AttendanceRepository $attendanceRepository)
     {
         $this->eventRepository = $eventRepository;
         $this->attendanceRepository = $attendanceRepository;
-
-        // Apply admin middleware to specific actions within the controller
-        // This is an alternative to applying it in the routes file
-        // $this->middleware('admin')->only(['create', 'store', 'edit', 'update', 'destroy', 'generateQrCode', 'showAttendance']);
+        // $this->middleware('admin')->only([...]); // Apply middleware if needed
     }
 
     /**
      * Display a listing of the events.
-     *
-     * @return \Illuminate\View\View
      */
     public function index(): View
     {
         $events = $this->eventRepository->getAll();
-        return view('events.index', compact('events'));
+        return view('events.index', compact('events')); // Ensure view exists
     }
 
     /**
      * Show the form for creating a new event.
-     * Requires admin privileges (handled by route middleware).
-     *
-     * @return \Illuminate\View\View
      */
     public function create(): View
     {
-        return view('events.create');
+        return view('events.create'); // Ensure view exists
     }
 
     /**
      * Store a newly created event in storage.
-     * Requires admin privileges (handled by route middleware).
-     * Uses EventRequest for validation and authorization.
-     *
-     * @param  EventRequest  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * This method now includes detailed logging for debugging observer issues.
      */
     public function store(EventRequest $request): RedirectResponse
     {
-        // Validation and authorization handled by EventRequest
-        $event = $this->eventRepository->create($request->validated());
-        return redirect()->route('events.index')->with('success', 'Event created successfully.');
+        // --- Start Debug Logging ---
+        Log::info('==================== EventController::store START ====================');
+        $validatedData = $request->validated();
+        Log::info('[Store] Event data validated.', $validatedData);
+
+        try {
+            Log::info('[Store] Attempting event creation via eventRepository->create()...');
+            // Create the event record using the repository
+            $event = $this->eventRepository->create($validatedData);
+
+            // Log details about the creation attempt
+            if ($event) {
+                Log::info('[Store] EventRepository::create executed successfully.');
+                Log::info('[Store] Created object class: ' . get_class($event));
+                Log::info('[Store] Created Event ID: ' . $event->id);
+
+                // Check if it's the correct model type (needed for observer)
+                if ($event instanceof \App\Models\Event) {
+                     Log::info('[Store] CONFIRMED: Created object IS an instance of App\Models\Event.');
+                } else {
+                     Log::error('[Store] CRITICAL: Created object is NOT an instance of App\Models\Event! It is: ' . get_class($event));
+                }
+
+                // Check if the 'created' event should fire (wasRecentlyCreated flag)
+                if ($event->wasRecentlyCreated) {
+                    Log::info('[Store] Event model wasRecentlyCreated is TRUE.');
+                } else {
+                     Log::warning('[Store] Event model wasRecentlyCreated is FALSE.');
+                }
+
+            } else {
+                Log::error('[Store] EventRepository::create returned null or false. Event creation failed.');
+            }
+            // --- End Debug Logging ---
+
+            // Handle failure case where event wasn't created
+            if (!$event) {
+                 Log::error('[Store] Redirecting back with error because $event is null/false.');
+                 return redirect()->back()->with('error', 'Failed to create event in repository.')->withInput();
+            }
+
+            // If successful, redirect to the index page
+            Log::info('[Store] Redirecting to events.index...');
+            Log::info('==================== EventController::store END ======================');
+            return redirect()->route('events.index')->with('success', 'Event created successfully.');
+
+        // Catch any exceptions during the process
+        } catch (\Exception $e) {
+            Log::error('[Store] EXCEPTION caught during event creation process: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            Log::info('==================== EventController::store END WITH EXCEPTION ============');
+            return redirect()->back()->with('error', 'An unexpected error occurred while creating the event.')->withInput();
+        }
     }
 
     /**
      * Display the specified event.
-     *
-     * @param  int  $id The ID of the event.
-     * @return \Illuminate\View\View
      */
-    public function show(int $id): View // Use route model binding or type hint ID
+     // Recommended: Use Route Model Binding for $event
+    public function show(Event $event): View // Changed int $id to Event $event
     {
-        // Consider using Route Model Binding for cleaner code: public function show(Event $event)
-        $event = $this->eventRepository->getById($id);
-        $attendanceCount = $this->attendanceRepository->getEventAttendanceCount($id);
-        return view('events.show', compact('event', 'attendanceCount'));
+        // $event = $this->eventRepository->getById($id); // No longer needed with RMB
+        $attendanceCount = $this->attendanceRepository->getEventAttendanceCount($event->id); // Use $event->id
+        return view('events.show', compact('event', 'attendanceCount')); // Ensure view exists
     }
 
     /**
      * Show the form for editing the specified event.
-     * Requires admin privileges (handled by route middleware).
-     *
-     * @param  int  $id The ID of the event.
-     * @return \Illuminate\View\View
      */
-    public function edit(int $id): View // Use route model binding or type hint ID
+     // Recommended: Use Route Model Binding
+    public function edit(Event $event): View // Changed int $id to Event $event
     {
-        // Consider using Route Model Binding: public function edit(Event $event)
-        $event = $this->eventRepository->getById($id);
-        return view('events.edit', compact('event'));
+        // $event = $this->eventRepository->getById($id); // No longer needed with RMB
+        return view('events.edit', compact('event')); // Ensure view exists
     }
 
     /**
      * Update the specified event in storage.
-     * Requires admin privileges (handled by route middleware).
-     * Uses EventRequest for validation and authorization.
-     *
-     * @param  EventRequest  $request
-     * @param  int  $id The ID of the event being updated.
-     * @return \Illuminate\Http\RedirectResponse
      */
-    public function update(EventRequest $request, int $id): RedirectResponse // Use route model binding or type hint ID
+     // Recommended: Use Route Model Binding
+    public function update(EventRequest $request, Event $event): RedirectResponse // Changed int $id to Event $event
     {
-        // Validation and authorization handled by EventRequest
-        // Consider using Route Model Binding: public function update(EventRequest $request, Event $event)
-        $this->eventRepository->update($id, $request->validated());
+        $this->eventRepository->update($event->id, $request->validated()); // Use $event->id
         return redirect()->route('events.index')->with('success', 'Event updated successfully.');
     }
 
     /**
      * Remove the specified event from storage.
-     * Requires admin privileges (handled by route middleware).
-     *
-     * @param  int  $id The ID of the event to delete.
-     * @return \Illuminate\Http\RedirectResponse
      */
-    public function destroy(int $id): RedirectResponse // Use route model binding or type hint ID
+     // Recommended: Use Route Model Binding
+    public function destroy(Event $event): RedirectResponse // Changed int $id to Event $event
     {
-        // Consider using Route Model Binding: public function destroy(Event $event)
-        $this->eventRepository->delete($id);
+        $this->eventRepository->delete($event->id); // Use $event->id
         return redirect()->route('events.index')->with('success', 'Event deleted successfully.');
     }
 
     /**
-     * Generate QR Code for the specified event.
-     * Requires admin privileges (handled by route middleware).
-     *
-     * @param  int  $id The ID of the event.
-     * @return \Illuminate\View\View
+     * Display the QR Code page for the specified event.
+     * Fetches QR code from the related event_qrcodes table.
      */
+     // Recommended: Use Route Model Binding
     public function generateQrCode(Event $event): View|RedirectResponse
     {
-        $qrCode = $event->qr_code_svg; // Retrieve stored SVG
-    
-        // Fallback if it's empty for some reason
-        if (empty($qrCode)) {
-            Log::warning("QR code SVG missing for event ID {$event->id}. Generating on the fly for display only.");
-            try {
-                $qrCodeUrl = route('events.attendance.record', $event->id);
-                $qrCode = QrCode::size(200)->format('svg')->generate($qrCodeUrl);
-            } catch (\Exception $e) {
-                 Log::error("Failed fallback QR for event ID {$event->id}: " . $e->getMessage());
-                 return redirect()->route('events.show', $event->id)->with('error', 'Could not generate or retrieve QR code.');
-            }
+        // Load the related QR code data using the 'qrcode' relationship
+        // The '?->' null-safe operator prevents errors if the qrcode record doesn't exist yet
+        $qrCodeSvg = $event->qrcode?->svg_data;
+
+        // Check if the QR code exists in the related table
+        if (empty($qrCodeSvg)) {
+            Log::warning("[generateQrCode] EventQrcode record or svg_data missing for event ID {$event->id}. Check Observer logs for creation details.");
+            // Redirect back to the event page with an error message
+            return redirect()->route('events.show', $event->id)->with('error', 'QR code is not available for this event yet.');
         }
-        // Pass the SVG string to the view
-        return view('events.qrcode', compact('event', 'qrCode'));
+
+        // Pass the event and the SVG string to the view
+        return view('events.qrcode', compact('event', 'qrCodeSvg')); // Ensure view exists
     }
+
     /**
      * Record attendance using QR Code scan.
-     * Accessible by any authenticated user.
-     *
-     * @param  \Illuminate\Http\Request $request
-     * @param  int  $id The ID of the event from the URL.
-     * @return \Illuminate\Http\RedirectResponse
      */
-    public function recordAttendance(Request $request, int $id): RedirectResponse // Use route model binding or type hint ID
+     // Recommended: Use Route Model Binding
+    public function recordAttendance(Request $request, Event $event): RedirectResponse // Changed int $id to Event $event
     {
-        // Consider using Route Model Binding: public function recordAttendance(Request $request, Event $event)
-        $user = Auth::user(); // Get the authenticated user.
-
-        // Optional: Check if event exists (Route model binding handles this)
-        // $event = $this->eventRepository->getById($id);
+        $user = Auth::user();
+        if (!$user) {
+             return redirect()->route('login')->with('error', 'Please login to record attendance.');
+        }
 
         // Record the attendance using the repository
-        $attendance = $this->attendanceRepository->recordAttendance($user->id, $id);
+        $attendance = $this->attendanceRepository->recordAttendance($user->id, $event->id); // Use $event->id
 
-        // Check if attendance was newly recorded or already existed
-        // The exact check depends on how recordAttendance signals success/failure/already_exists
-        // Assuming it returns the model and attended_at is set on new records:
-        if ($attendance && $attendance->wasRecentlyCreated) { // Check if the record was just created
-             return redirect()->route('events.show', $id)->with('success', 'Attendance recorded successfully.');
-        } elseif ($attendance) { // Record already existed
-            return redirect()->route('events.show', $id)->with('info', 'Attendance already recorded previously.'); // Use 'info' or 'warning'
+        // Check attendance status and redirect
+        if ($attendance && $attendance->wasRecentlyCreated) {
+             return redirect()->route('events.show', $event->id)->with('success', 'Attendance recorded successfully.');
+        } elseif ($attendance) {
+             return redirect()->route('events.show', $event->id)->with('info', 'Attendance already recorded previously.');
         } else {
-             // Handle potential errors if attendance couldn't be recorded for some reason
-             return redirect()->route('events.show', $id)->with('error', 'Failed to record attendance.');
+             return redirect()->route('events.show', $event->id)->with('error', 'Failed to record attendance. Please try again.');
         }
     }
 
     /**
      * Display the attendance list for a specific event.
-     * Requires admin privileges (handled by route middleware).
-     *
-     * @param  int  $id The ID of the event.
-     * @return \Illuminate\View\View
      */
-     public function showAttendance(int $id): View // Use route model binding or type hint ID
-     {
-        // Consider using Route Model Binding: public function showAttendance(Event $event)
-        $event = $this->eventRepository->getById($id);
-        $attendees = $this->attendanceRepository->getEventAttendees($id);
-        return view('events.attendance', compact('event', 'attendees'));
-     }
+     // Recommended: Use Route Model Binding
+      public function showAttendance(Event $event): View // Changed int $id to Event $event
+      {
+          $attendees = $this->attendanceRepository->getEventAttendees($event->id); // Use $event->id
+          return view('events.attendance', compact('event', 'attendees')); // Ensure view exists
+      }
 }
