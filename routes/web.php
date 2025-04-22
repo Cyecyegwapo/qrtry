@@ -47,7 +47,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/events/{event}/qrcode', [EventController::class, 'generateQrCode'])->name('events.qrcode')->middleware('admin'); // Only admin generates QR
     Route::get('/events/{event}/attendance/record', [EventController::class, 'recordAttendance'])->name('events.attendance.record'); // Logged-in users record attendance
     Route::get('/events/{event}/attendance', [EventController::class, 'showAttendance'])->name('events.attendance')->middleware('admin'); // Only admin views full attendance list
-
+    Route::get('/events/{event}/qrcode/download', [EventController::class, 'downloadQrCode'])
+    ->name('events.qrcode.download')
+    ->middleware(['auth', 'admin']); // Check middleware placement
     // Add other authenticated routes here (e.g., profile management if added by Breeze)
     Route::get('/home', [HomeController::class, 'index'])->name('home');
 });
