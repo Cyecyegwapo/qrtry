@@ -54,6 +54,11 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/home', [HomeController::class, 'index'])->name('home');
 });
 
+    // *** ADDED: Route for updating QR Code settings (Admin only) ***
+    Route::put('/events/{event}/update-qr-settings', [EventController::class, 'updateQrCodeSettings'])
+        ->name('events.updateQrSettings') // This is the route name needed
+        ->middleware('admin'); // Ensure only admins can access
+
 // Include authentication routes provided by Laravel Breeze
 // In routes/web.php
 // Example from Breeze routes/auth.php
