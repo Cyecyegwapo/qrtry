@@ -1,410 +1,401 @@
-@extends('layouts.app')
-
-
-
-{{-- ======================================================== --}}
-
-{{-- == SECTION 1: EVENT DETAILS & ACTIONS == --}}
-
-{{-- ======================================================== --}}
-
-@section('content') {{-- Assuming a content section in layouts.app for this part --}}
-
-<div class="container">
-
-<h1>{{ $event->title }}</h1>
-
-<p><strong>Description:</strong> {{ $event->description }}</p>
-
-{{-- Format date/time display if desired --}}
-
-<p><strong>Date:</strong> {{ optional($event->date)->format('Y-m-d') }}</p> {{-- Added optional() and format --}}
-
-<p><strong>Time:</strong> {{ $event->time }}</p> {{-- Consider formatting if $event->time is a Carbon instance --}}
-
-<p><strong>Location:</strong> {{ $event->location }}</p>
-
-<p><strong>Attendance Count:</strong> {{ $attendanceCount }}</p>
-
-@if($event->year_level)<p><strong>Target Year Level:</strong> {{ $event->year_level }}</p>@endif
-
-@if($event->department)<p><strong>Target Department:</strong> {{ $event->department }}</p>@endif
-
-
-
-{{-- Admin Specific Section --}}
-
-@if(auth()->user()->isAdmin())
-
-<hr> {{-- Add separator --}}
-
-<h4>Admin Information & Actions</h4>
-
-
-
-{{-- **ADDED: QR Code Status Display** --}}
-
-<div class="mb-3 p-3 border rounded bg-light"> {{-- Simple styling --}}
-
-<h5>QR Code Status:</h5>
-
-{{-- Check if the qrcode relationship is loaded and exists --}}
-
-{{-- Assumes $event->load('qrcode') was called in the controller's show method --}}
-
-@if ($event->qrcode)
-
-<p>
-
-<strong>Admin Status:</strong>
-
-<span class="{{ $event->qrcode->is_active ? 'text-success' : 'text-danger' }}">
-
-{{ $event->qrcode->is_active ? 'Enabled' : 'Disabled (Force Stopped)' }}
-
-</span>
-
-</p>
-
-<p>
-
-<strong>Active From:</strong>
-
-{{ $event->qrcode->active_from ? $event->qrcode->active_from->format('Y-m-d H:i:s') : 'Always Active (No Start Limit)' }}
-
-</p>
-
-<p>
-
-<strong>Active Until:</strong>
-
-{{ $event->qrcode->active_until ? $event->qrcode->active_until->format('Y-m-d H:i:s') : 'Never Expires (No End Limit)' }}
-
-</p>
-
-<p>
-
-<strong>Currently Valid for Scanning:</strong>
-
-<span class="{{ $event->qrcode->isValidNow() ? 'text-success' : 'text-danger' }}">
-
-{{ $event->qrcode->isValidNow() ? 'Yes' : 'No' }}
-
-</span>
-
-@if(!$event->qrcode->isValidNow())
-
-<small class="d-block text-muted">
-
-(Reason:
-
-@if(!$event->qrcode->is_active) Disabled by Admin
-
-@elseif($event->qrcode->active_from && now()->lt($event->qrcode->active_from)) Not started yet
-
-@elseif($event->qrcode->active_until && now()->gt($event->qrcode->active_until)) Expired
-
-@else Unknown @endif
-
-)
-
-</small>
-
-@endif
-
-</p>
-
-@else
-
-<p class="text-muted">QR Code has not been generated for this event yet.</p>
-
-@endif
-
-</div>
-
-{{-- **END OF ADDED QR Code Status Display** --}}
-
-
-
-{{-- Existing Admin Action Buttons --}}
-
-<div class="mt-2 mb-3">
-
-<a href="{{ route('events.edit', $event->id) }}" class="btn btn-primary btn-sm">Edit Event & QR Settings</a>
-
-<a href="{{ route('events.qrcode', $event->id) }}" class="btn btn-secondary btn-sm">View/Generate QR Code Page</a>
-
-<a href="{{ route('events.attendance', $event->id) }}" class="btn btn-info btn-sm">View Attendance List</a>
-
-@if ($event->qrcode) {{-- Only show download if QR exists --}}
-
-<a href="{{ route('events.qrcode.download', $event->id) }}" class="btn btn-success btn-sm">Download QR Code</a>
-
-@endif
-
-<form action="{{ route('events.destroy', $event->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this event and all related data?');">
-
-@csrf
-
-@method('DELETE')
-
-<button type="submit" class="btn btn-danger btn-sm">Delete Event</button>
-
-</form>
-
-</div>
-
-<hr> {{-- Add separator --}}
-
-@endif
-
-{{-- End Admin Specific Section --}}
-
-
-
-</div> {{-- End of container div --}}
-
-{{-- End of content section --}}
-
-
-
-
-
-{{-- ======================================================== --}}
-
-{{-- == SECTION 2: QR SCANNER UI (Using Blade Components) == --}}
-
-{{-- ======================================================== --}}
-
-{{-- This part uses Blade component syntax and Tailwind CSS --}}
-
-{{-- It seems separate from the Bootstrap section above --}}
-
-{{-- Kept exactly as provided --}}
-
-
-
-{{-- Assuming layouts/app.blade.php uses this component syntax --}}
-
-<x-slot name="header">
-
-<h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
-
-{{ __('User Dashboard / Scan QR') }}
-
-</h2>
-
-</x-slot>
-
-
-
-{{-- ======================================================== --}}
-{{-- ==   SECTION 2: QR SCANNER UI (Using Tailwind CSS)    == --}}
-{{-- ======================================================== --}}
-<div class="py-12">
-    <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-        <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
-            <div class="p-6 text-gray-900 dark:text-gray-100">
-
-                <h3 class="text-lg font-medium mb-4">Scan Event QR Code</h3>
-
-                {{-- Area for Live Camera Scanner --}}
-                <div class="border dark:border-gray-700 p-4 rounded mb-4">
-                    <h4 class="font-semibold mb-2">Live Camera Scan</h4>
-                    {{-- 1. HTML Structure for the Live Scanner --}}
-                    <div style="width: 100%; max-width: 500px; margin: auto;" id="qr-reader"></div>
-                    <div class="text-center mt-4">
-                         <button id="start-scan-btn" class="inline-flex items-center px-4 py-2 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-500 active:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150">
-                            Start Camera Scan
-                         </button>
-                         <button id="stop-scan-btn" style="display: none;" class="inline-flex items-center px-4 py-2 bg-red-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-red-500 active:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150">
-                             Stop Camera Scan
-                         </button>
+{{-- Use the component layout ONLY --}}
+<x-app-layout>
+    {{-- Define the header content --}}
+    <x-slot name="header">
+        <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
+            {{-- Header content adapted based on role --}}
+            @if(auth()->user()?->isAdmin())
+                {{ __('Event Details & Admin: ') }} {{ $event->title }}
+            @else
+                {{ isset($event) ? __('Scan QR for: ') . $event->title : __('Scan Event QR Code') }}
+            @endif
+        </h2>
+    </x-slot>
+
+    {{-- Main Content Area --}}
+    <div class="py-12">
+        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+
+            {{-- Conditional Display: Show Admin View OR User Scanner View --}}
+            @if(auth()->user()?->isAdmin())
+
+                {{-- ======================================================== --}}
+                {{-- == SECTION 1: ADMIN VIEW (DETAILS & ACTIONS)         == --}}
+                {{-- ======================================================== --}}
+                <div class="space-y-6 max-w-4xl mx-auto"> {{-- Max width for admin content --}}
+                    {{-- Event Details Card --}}
+                    <div class="bg-white dark:bg-gray-800 shadow-xl sm:rounded-lg overflow-hidden">
+                         <div class="p-6 sm:p-8 border-b border-gray-200 dark:border-gray-700">
+                             <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-5">Event Information</h3>
+                             <dl class="text-sm">
+                                 {{-- Title --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Title:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $event->title }}</dd>
+                                 </div>
+                                 {{-- Description --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Description:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{{ $event->description }}</dd>
+                                 </div>
+                                 {{-- Date --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Date:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ optional($event->date)->format('F j, Y') }}</dd>
+                                 </div>
+                                 {{-- Time --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Time:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $event->time ? \Carbon\Carbon::parse($event->time)->format('g:i A') : 'N/A' }}</dd>
+                                 </div>
+                                 {{-- Location --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Location:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $event->location }}</dd>
+                                 </div>
+                                 {{-- Attendance Count --}}
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Attendance Count:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $attendanceCount ?? '0' }}</dd>
+                                 </div>
+                                 {{-- Optional Fields --}}
+                                 @if($event->year_level)
+                                 <div class="grid grid-cols-3 gap-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Target Year Level:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $event->year_level }}</dd>
+                                 </div>
+                                 @endif
+                                 @if($event->department)
+                                 <div class="grid grid-cols-3 gap-4 py-2 {{ !$event->year_level ? 'border-b border-gray-200 dark:border-gray-700' : '' }}">
+                                     <dt class="col-span-1 font-semibold text-gray-700 dark:text-gray-300">Target Department:</dt>
+                                     <dd class="col-span-2 text-gray-900 dark:text-gray-100">{{ $event->department }}</dd>
+                                 </div>
+                                 @endif
+                             </dl>
+                         </div>
+                    </div>
+
+                    {{-- Admin Specific Section Card --}}
+                    <div class="bg-white dark:bg-gray-800 shadow-xl sm:rounded-lg overflow-hidden">
+                        <div class="p-6 sm:p-8">
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-5 border-b border-gray-200 dark:border-gray-700 pb-3">Admin Information & Actions</h3>
+
+                            {{-- QR Code Status Display (Tailwind Styled) --}}
+                            <div class="mb-6 p-4 border border-stone-300 dark:border-stone-700 rounded-md bg-stone-50 dark:bg-stone-800/50">
+                                 <h4 class="font-semibold mb-3 text-gray-800 dark:text-gray-200">QR Code Status</h4>
+                                 @if ($event->qrcode)
+                                    <dl class="text-sm">
+                                         {{-- Admin Status Row --}}
+                                         <div class="grid grid-cols-3 gap-2 py-1">
+                                             <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Admin Status:</dt>
+                                             <dd class="col-span-2">
+                                                 <span class="px-2 py-0.5 text-xs rounded-full {{ $event->qrcode->is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
+                                                     {{ $event->qrcode->is_active ? 'Enabled' : 'Disabled' }}
+                                                 </span>
+                                             </dd>
+                                         </div>
+                                         {{-- Active From Row --}}
+                                         <div class="grid grid-cols-3 gap-2 py-1">
+                                             <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Active From:</dt>
+                                             <dd class="col-span-2 text-gray-800 dark:text-gray-200">{{ $event->qrcode->active_from ? $event->qrcode->active_from->format('Y-m-d g:i A') : 'Always Active' }}</dd>
+                                         </div>
+                                         {{-- Active Until Row --}}
+                                         <div class="grid grid-cols-3 gap-2 py-1">
+                                             <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Active Until:</dt>
+                                             <dd class="col-span-2 text-gray-800 dark:text-gray-200">{{ $event->qrcode->active_until ? $event->qrcode->active_until->format('Y-m-d g:i A') : 'Never Expires' }}</dd>
+                                         </div>
+                                         {{-- Current Validity Row --}}
+                                         <div class="grid grid-cols-3 gap-2 py-1 items-start">
+                                             <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Currently Valid:</dt>
+                                             <dd class="col-span-2">
+                                                  <span class="px-2 py-0.5 text-xs rounded-full {{ $event->qrcode->isValidNow() ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
+                                                      {{ $event->qrcode->isValidNow() ? 'Yes' : 'No' }}
+                                                  </span>
+                                                  {{-- Reason if not valid --}}
+                                                  @if(!$event->qrcode->isValidNow())
+                                                     <span class="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                         (Reason:
+                                                         @if(!$event->qrcode->is_active) Admin Disabled
+                                                         @elseif($event->qrcode->active_from && now()->lt($event->qrcode->active_from)) Not started
+                                                         @elseif($event->qrcode->active_until && now()->gt($event->qrcode->active_until)) Expired
+                                                         @else Unknown @endif)
+                                                     </span>
+                                                @endif
+                                             </dd>
+                                         </div>
+                                    </dl>
+                                @else
+                                    <p class="text-sm text-gray-500 dark:text-gray-400 italic">QR Code details not available (generate via Edit page).</p>
+                                @endif
+                            </div>
+
+                            {{-- Admin Action Buttons (Tailwind Styled) --}}
+                            <h4 class="font-semibold mb-3 text-gray-800 dark:text-gray-200">Actions</h4>
+                            <div class="flex flex-wrap gap-3">
+                                {{-- Buttons using specific colors --}}
+                                <a href="{{ route('events.edit', $event->id) }}" class="inline-flex items-center px-3 py-1.5 bg-purple-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-purple-700 focus:bg-purple-700 active:bg-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150" title="Edit Event & QR Settings">Edit</a>
+                                <a href="{{ route('events.qrcode', $event->id) }}" class="inline-flex items-center px-3 py-1.5 bg-teal-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-teal-700 focus:bg-teal-700 active:bg-teal-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150" title="View QR Code Page">QR Page</a>
+                                <a href="{{ route('events.attendance', $event->id) }}" class="inline-flex items-center px-3 py-1.5 bg-orange-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-orange-700 focus:bg-orange-700 active:bg-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150" title="View Attendance List">Attendance List</a>
+                                @if ($event->qrcode)
+                                    <a href="{{ route('events.qrcode.download', $event->id) }}" class="inline-flex items-center px-3 py-1.5 bg-green-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-green-700 focus:bg-green-700 active:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150" title="Download QR Code">Download QR</a>
+                                @endif
+                                <form action="{{ route('events.destroy', $event->id) }}" method="POST" class="inline" onsubmit="return confirm('Are you sure you want to delete this event and all related data?');">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="inline-flex items-center px-3 py-1.5 bg-red-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-red-700 focus:bg-red-700 active:bg-red-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150" title="Delete Event">Delete</button>
+                                </form>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                {{-- Area for File Upload Scanner --}}
-                <div class="border dark:border-gray-700 p-4 rounded">
-                     <h4 class="font-semibold mb-2">Scan from Uploaded Image</h4>
-                     {{-- ADDED: File Input --}}
-                     <div>
-                        <label for="qr-input-file" class="block font-medium text-sm text-gray-700 dark:text-gray-300 mb-1">Upload QR Code Image:</label>
-                        <input type="file" id="qr-input-file" accept="image/*" class="block w-full text-sm text-gray-500 dark:text-gray-400
-                            file:mr-4 file:py-2 file:px-4
-                            file:rounded-md file:border-0
-                            file:text-sm file:font-semibold
-                            file:bg-indigo-100 dark:file:bg-indigo-900 file:text-indigo-700 dark:file:text-indigo-300
-                            hover:file:bg-indigo-200 dark:hover:file:bg-indigo-800 cursor-pointer"/>
+            @else
+
+                {{-- ======================================================== --}}
+                {{-- == SECTION 2: USER VIEW (QR SCANNER UI ONLY)         == --}}
+                {{-- ======================================================== --}}
+                 {{-- This section contains the QR Scanner UI, styled with Tailwind --}}
+                <div class="space-y-6 max-w-xl mx-auto"> {{-- Max width for scanner --}}
+                     <div class="bg-white dark:bg-gray-800 shadow-xl sm:rounded-lg overflow-hidden">
+                         <div class="p-6 sm:p-8 text-gray-900 dark:text-gray-100">
+                             <h3 class="text-lg font-semibold mb-5 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-3">
+                                Scan QR Code for: {{ $event->title }}
+                             </h3>
+                             {{-- Area for Live Camera Scanner --}}
+                             <div class="border dark:border-gray-600 p-4 rounded-lg mb-6 bg-gray-50 dark:bg-gray-800/50">
+                                 <h4 class="font-semibold mb-3 text-center text-gray-800 dark:text-gray-200">Live Camera Scan</h4>
+                                 <div class="w-full max-w-xs sm:max-w-sm mx-auto aspect-square bg-black rounded-md flex items-center justify-center mb-4 overflow-hidden" id="qr-reader">
+                                     <p class="text-gray-400 dark:text-gray-500 text-sm">Initializing Camera...</p>
+                                 </div>
+                                 <div class="text-center space-x-3">
+                                     <button id="start-scan-btn" class="inline-flex items-center px-5 py-2 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-700 focus:bg-blue-700 active:bg-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150 disabled:opacity-50 disabled:cursor-not-allowed">Start Scan</button>
+                                     <button id="stop-scan-btn" style="display: none;" class="inline-flex items-center px-5 py-2 bg-rose-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-rose-700 focus:bg-rose-700 active:bg-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition ease-in-out duration-150">Stop Scan</button>
+                                 </div>
+                             </div>
+                             {{-- Area for File Upload Scanner --}}
+                             <div class="border dark:border-gray-600 p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                                  <h4 class="font-semibold mb-3 text-center text-gray-800 dark:text-gray-200">Scan from Uploaded Image</h4>
+                                  <div>
+                                      <label for="qr-input-file" class="sr-only">Upload QR Code Image:</label>
+                                      <input type="file" id="qr-input-file" accept="image/*" class="block w-full text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 file:mr-4 file:py-2 file:px-4 file:rounded-l-lg file:border-0 file:text-sm file:font-semibold file:cursor-pointer file:bg-indigo-200 dark:file:bg-indigo-700 file:text-indigo-800 dark:file:text-indigo-100 hover:file:bg-indigo-300 dark:hover:file:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"/>
+                                  </div>
+                             </div>
+                             {{-- Area for Scan Results --}}
+                             <div id="qr-reader-results" class="mt-6 text-center font-medium py-3 px-4 rounded-lg min-h-[50px] text-sm">
+                                {{-- Results will be injected here by JS --}}
+                             </div>
+                         </div>
                      </div>
                 </div>
+            @endif
 
-                {{-- Area for Scan Results --}}
-                <div id="qr-reader-results" class="mt-4 text-center font-medium"></div>
+        </div> {{-- End Max Width Container --}}
+    </div> {{-- End Outer Padding Div --}}
 
-            </div>
-        </div>
-    </div>
-</div>
 
-{{-- 2. Include the html5-qrcode library --}}
-{{-- Put this ideally before your closing </body> tag or in a scripts section --}}
-<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    {{-- Push the Scanner JavaScript to the layout's script stack --}}
+    {{-- Only include JS if the user is NOT an admin (they see the scanner) --}}
+    @if(!auth()->user()?->isAdmin())
+        @push('scripts')
+            <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+            {{-- FULL JAVASCRIPT FOR SCANNER - Including previous fixes --}}
+            <script>
+                // Pass PHP variables safely to JS
+                const currentPageEventId = @json($event->id);
+                const appBaseUrl = @json(rtrim(url('/'), '/')); // Get base URL and remove trailing slash
+                console.log('Base URL for Check:', appBaseUrl); // Verify this in console
 
-{{-- 3. JavaScript to Initialize and Control the Scanner --}}
-<script>
-    const currentPageEventId = {{ $event->id }};
-    // --- Common Variables and Functions ---
-    const resultsElement = document.getElementById('qr-reader-results');
-    // Instantiate the scanner class *once* globally within the script scope
-    const html5QrCode = new Html5Qrcode("qr-reader"); // Target the div#qr-reader for camera
+                // --- Common Variables and Functions ---
+                const resultsElement = document.getElementById('qr-reader-results');
+                const qrReaderDiv = document.getElementById('qr-reader');
+                const fileInput = document.getElementById('qr-input-file');
+                const startBtn = document.getElementById('start-scan-btn');
+                const stopBtn = document.getElementById('stop-scan-btn');
+                let html5QrCode = null;
 
-    // Function called when a QR code is successfully scanned (used by both methods)
-    function onScanSuccess(decodedText, decodedResult) {
-                console.log(`Scan Success: Code = ${decodedText}`, decodedResult);
-                stopScanning(); // Stop camera if running
-
-                // Regex to extract event ID from the attendance URL pattern
-                const attendanceUrlPattern = /\/events\/(\d+)\/attendance\/record/;
-                const match = decodedText.match(attendanceUrlPattern);
-
-                if (match && match[1]) {
-                    // It's an attendance code, extract the event ID found in the QR code
-                    const scannedEventId = parseInt(match[1], 10);
-                    console.log("Scanned Event ID:", scannedEventId);
-
-                    // Compare scanned ID with the current page's event ID
-                    if (scannedEventId === currentPageEventId) {
-                        // IDs match - Valid code for this event
-                        // ** UPDATED to redirect **
-                        resultsElement.textContent = `Valid attendance code found! Redirecting to record...`;
-                        resultsElement.className = 'mt-4 text-center font-medium text-green-600 dark:text-green-400';
-                        // ** RE-ENABLED REDIRECT **
-                        setTimeout(() => { window.location.href = decodedText; }, 500); // Redirect after delay
-                    } else {
-                        // IDs do NOT match - Invalid code for this event
-                        resultsElement.textContent = `Invalid: QR code is for a different event (Scanned ID: ${scannedEventId}, Expected ID: ${currentPageEventId}).`;
-                        resultsElement.className = 'mt-4 text-center font-medium text-red-600 dark:text-red-400';
-                        // No redirect here
+                function initializeQrCodeScanner() {
+                    if (!html5QrCode && document.getElementById("qr-reader")) {
+                        try {
+                            html5QrCode = new Html5Qrcode("qr-reader");
+                        } catch (e) { console.error("Init Fail:", e); if(startBtn) startBtn.disabled = true; if(fileInput) fileInput.disabled = true; if(qrReaderDiv) qrReaderDiv.innerHTML = '<p class="text-red-500 p-4">Scanner Fail</p>';}
+                    } else if (!document.getElementById("qr-reader")) {
+                         console.error("QR Reader element not found");
+                         if(startBtn) startBtn.disabled = true; if(fileInput) fileInput.disabled = true;
                     }
-                } else {
-                    // It's NOT an attendance code matching the pattern, just display the result
-                    resultsElement.textContent = `Scanned non-attendance code: ${decodedText}`;
-                    resultsElement.className = 'mt-4 text-center font-medium text-yellow-600 dark:text-yellow-400';
-                    // No redirect here
                 }
-            }
 
-    // Function called if scanning fails (used by both methods)
-    function onScanFailure(error) {
-        // Don't display continuous errors from camera scan failure
-        // console.warn(`Code scan error = ${error}`);
-        // For file scan errors, we might want to display them:
-        if (error instanceof Error && document.getElementById('qr-input-file').files.length > 0) {
-            // Check if the error object exists and if it's related to a file scan attempt
-             resultsElement.textContent = `Error scanning file: ${error.message || error}`;
-             resultsElement.classList.remove('text-green-600', 'dark:text-green-400', 'text-yellow-600', 'dark:text-yellow-400');
-             resultsElement.classList.add('text-red-600', 'dark:text-red-400');
-        } else if (typeof error === 'string' && error.toLowerCase().includes('no qr code found')) {
-             resultsElement.textContent = `No QR code found in the uploaded file.`;
-             resultsElement.classList.remove('text-green-600', 'dark:text-green-400', 'text-yellow-600', 'dark:text-yellow-400');
-             resultsElement.classList.add('text-red-600', 'dark:text-red-400');
-        }
-    }
+                function updateResult(message, type = 'info') {
+                     if (!resultsElement) return;
+                     resultsElement.textContent = message;
+                     resultsElement.className = 'mt-6 text-center font-medium py-3 px-4 rounded-lg min-h-[50px] text-sm '; // Base
+                     // Clear old colors
+                    resultsElement.classList.remove(...['bg-green-100/50', 'dark:bg-green-900/50', 'text-green-700', 'dark:text-green-200', 'bg-red-100/50', 'dark:bg-red-900/50', 'text-red-700', 'dark:text-red-200', 'bg-yellow-100/50', 'dark:bg-yellow-900/50', 'text-yellow-700', 'dark:text-yellow-200', 'bg-blue-100/50', 'dark:bg-blue-900/50', 'text-blue-700', 'dark:text-blue-200', 'bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-300']);
+                     // Add new colors
+                     switch (type) {
+                         case 'success': resultsElement.classList.add('bg-green-100/50', 'dark:bg-green-900/50', 'text-green-700', 'dark:text-green-200'); break;
+                         case 'error': resultsElement.classList.add('bg-red-100/50', 'dark:bg-red-900/50', 'text-red-700', 'dark:text-red-200'); break;
+                         case 'warning': resultsElement.classList.add('bg-yellow-100/50', 'dark:bg-yellow-900/50', 'text-yellow-700', 'dark:text-yellow-200'); break;
+                         case 'info': resultsElement.classList.add('bg-blue-100/50', 'dark:bg-blue-900/50', 'text-blue-700', 'dark:text-blue-200'); break;
+                         case 'clear': resultsElement.textContent = ''; break;
+                         default: resultsElement.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-300'); break;
+                     }
+                }
 
-    // --- Live Camera Scanning Logic ---
-    let isScanning = false;
-    const startBtn = document.getElementById('start-scan-btn');
-    const stopBtn = document.getElementById('stop-scan-btn');
+                // --- onScanSuccess with Stricter Validation (Using Regex Literal + startsWith) ---
+                 function onScanSuccess(decodedText, decodedResult) {
+                    console.log(`Scan Success: Code = ${decodedText}`, decodedResult);
+                    stopScanning(); // Stop camera if running
 
-    function startScanning() {
-        if (isScanning) return;
-        clearResults();
+                    // 1. Define the simple path pattern using a Regex Literal
+                    const pathPattern = /\/events\/(\d+)\/attendance\/record$/; // Checks the end part of the URL
 
-        // Check for camera permissions and availability before creating
-        Html5Qrcode.getCameras().then(devices => {
-            if (devices && devices.length) {
-                 const config = { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true };
-                // Start scanning. Request camera permission. Use back camera if available.
-                html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
-                    .then(() => {
-                        isScanning = true;
-                        startBtn.style.display = 'none';
-                        stopBtn.style.display = 'inline-flex';
-                        resultsElement.textContent = 'Scanning... Point camera at QR code.';
-                    })
-                    .catch(err => handleCameraError(err));
-            } else {
-                resultsElement.textContent = 'No cameras found on this device.';
-                resultsElement.classList.add('text-red-600', 'dark:text-red-400');
-            }
-        }).catch(err => handleCameraError(err));
-    }
+                    // 2. Test the path pattern first
+                    const match = decodedText.match(pathPattern);
 
-    function stopScanning() {
-        if (!isScanning || !html5QrCode || !html5QrCode.isScanning) return; // Check if library thinks it's scanning
+                    // 3. Check BOTH path pattern match AND if it starts with the correct base URL
+                    // Ensure appBaseUrl is defined and not empty before checking startsWith
+                    if (match && match[1] && appBaseUrl && decodedText.startsWith(appBaseUrl)) {
+                        // Pattern matched AND it's from our app URL
 
-        html5QrCode.stop().then((ignore) => {
-            console.log("QR Code scanning stopped.");
-            isScanning = false;
-            startBtn.style.display = 'inline-flex';
-            stopBtn.style.display = 'none';
-            document.getElementById('qr-reader').innerHTML = ''; // Clear video feed area
-        }).catch((err) => {
-            console.error("Failed to stop scanner:", err);
-            isScanning = false; // Assume stopped even on error
-            startBtn.style.display = 'inline-flex';
-            stopBtn.style.display = 'none';
-        });
-    }
+                        const scannedEventId = parseInt(match[1], 10);
+                        console.log("Scanned Event ID:", scannedEventId);
 
-    function handleCameraError(err) {
-        console.error("Camera Error:", err);
-        resultsElement.textContent = `Error starting camera: ${err.message || err}. Check permissions or try uploading an image.`;
-        resultsElement.classList.add('text-red-600', 'dark:text-red-400');
-        // Ensure UI reflects stopped state
-        isScanning = false;
-        startBtn.style.display = 'inline-flex';
-        stopBtn.style.display = 'none';
-    }
+                        // 4. Check if the scanned Event ID matches the current page's Event ID
+                        if (scannedEventId === currentPageEventId) {
+                            updateResult('Valid attendance code found! Redirecting...', 'success');
+                            // Redirect to the scanned URL (which is validated)
+                            setTimeout(() => { window.location.href = decodedText; }, 500);
+                        } else {
+                            // Correct format & origin, but WRONG event ID
+                            updateResult(`Invalid QR: Code is for a different event.`, 'error');
+                            console.log(`Event ID mismatch: Scanned ${scannedEventId}, Expected ${currentPageEventId}`);
+                        }
+                    } else {
+                        // Either path didn't match OR it didn't start with appBaseUrl
+                        updateResult(`Invalid QR: Code does not match expected format or origin.`, 'error');
+                        if (!match) {
+                            console.log("Failed Path Pattern Match:", decodedText);
+                        } else if (!appBaseUrl || !decodedText.startsWith(appBaseUrl)) {
+                            console.log("Failed Origin Check:", decodedText, "Expected origin starting with:", appBaseUrl);
+                        }
+                    }
+                }
+                 // --- End of onScanSuccess ---
 
-    // --- File Upload Scanning Logic --- ADDED ---
-    const fileInput = document.getElementById('qr-input-file');
+                function onScanFailure(error) {
+                     if (error && fileInput && fileInput.value) {
+                         let errorMessage = "Could not scan from file.";
+                         if (error instanceof Error) { errorMessage = `Error scanning file: ${error.message || error}`; }
+                         else if (typeof error === 'string') { errorMessage = error.toLowerCase().includes('no qr code found') ? `No QR code found.` : `Error: ${error}`; }
+                         updateResult(errorMessage, 'error');
+                         fileInput.value = '';
+                     }
+                     // Avoid logging continuous "No QR code found" errors from camera unless debugging
+                     if (!(typeof error === 'string' && error.includes('No QR code found'))) { console.warn(`Scan Fail: ${error}`); }
+                }
 
-    fileInput.addEventListener('change', e => {
-        if (e.target.files && e.target.files.length > 0) {
-            const file = e.target.files[0];
-            clearResults();
-            resultsElement.textContent = 'Scanning uploaded file...';
+                // --- Live Camera Logic ---
+                let isScanning = false;
+                function startScanning() {
+                    if (isScanning || !html5QrCode) return;
+                    clearResults();
+                    qrReaderDiv.innerHTML = ''; // Clear placeholder
+                    updateResult('Initializing camera...', 'info');
+                    qrReaderDiv.classList.remove('items-center', 'justify-center'); // Allow video placement
+                    Html5Qrcode.getCameras().then(devices => {
+                        if (devices && devices.length) {
+                           // Try to find back camera first, fallback to first camera
+                           const camId = devices.find(d=>d.label.toLowerCase().includes('back'))?.id || devices[0].id;
+                           console.log(`Using camera: ${camId}`);
+                           // Function to calculate qrbox size dynamically
+                           const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
+                                let minEdgePercentage = 0.7; // Use 70% of the smaller edge
+                                let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
+                                let qrboxSize = Math.floor(minEdgeSize * minEdgePercentage);
+                                return { width: qrboxSize, height: qrboxSize };
+                            };
+                           const config = { fps: 10, qrbox: qrboxFunction, rememberLastUsedCamera: false, supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] };
+                           html5QrCode.start(camId, config, onScanSuccess, onScanFailure)
+                            .then(() => {
+                                console.log("Scanner started successfully.");
+                                isScanning = true;
+                                if(startBtn) startBtn.style.display = 'none';
+                                if(stopBtn) stopBtn.style.display = 'inline-flex';
+                                updateResult('Scanning... Point camera at QR code.', 'info');
+                             })
+                            .catch(handleCameraError);
+                        } else { handleCameraError('No cameras found.'); }
+                    }).catch(handleCameraError);
+                }
+                function stopScanning() {
+                     if (!html5QrCode || !html5QrCode.isScanning) { // Check if scanning before trying to stop
+                        console.log("Stop requested but scanner not active.");
+                        isScanning = false; // Ensure state is correct
+                        if(startBtn) startBtn.style.display = 'inline-flex';
+                        if(stopBtn) stopBtn.style.display = 'none';
+                        // Ensure placeholder is shown if div is empty
+                        if (qrReaderDiv && !qrReaderDiv.querySelector('video') && !qrReaderDiv.querySelector('canvas')) {
+                            qrReaderDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>';
+                            qrReaderDiv.classList.add('items-center', 'justify-center');
+                        }
+                        return;
+                    }
+                     // Attempt to stop, handle potential errors, always update UI state
+                     html5QrCode.stop().then(()=> console.log("Scanner stopped.")).catch(err => console.error("Stop fail:", err))
+                     .finally(() => {
+                         isScanning = false;
+                         if(startBtn) startBtn.style.display = 'inline-flex';
+                         if(stopBtn) stopBtn.style.display = 'none';
+                         if(qrReaderDiv) {
+                             qrReaderDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>'; // Reset placeholder
+                             qrReaderDiv.classList.add('items-center', 'justify-center');
+                         }
+                         updateResult('Scanner stopped.', 'info');
+                     });
+                }
+                 function handleCameraError(err) {
+                     console.error("Cam Error:", err); let msg = 'Camera error. ';
+                     if (err instanceof Error) { msg += err.message; } else if(typeof err === 'string'){ msg += err; }
+                     updateResult(msg, 'error');
+                     isScanning = false; // Reset state
+                     if(startBtn) startBtn.style.display = 'inline-flex';
+                     if(stopBtn) stopBtn.style.display = 'none';
+                     if(qrReaderDiv) { // Show error in reader div
+                         qrReaderDiv.innerHTML = `<p class="text-red-500 dark:text-red-300 p-4 text-sm font-medium">Camera Error</p>`;
+                         qrReaderDiv.classList.add('items-center', 'justify-center');
+                     }
+                 }
 
-            // Use the same html5QrCode instance to scan the file
-            // The second argument 'true' means show the image in the qr-reader div (optional)
-            html5QrCode.scanFile(file, true)
-                .then(onScanSuccess) // Reuse the success callback
-                .catch(err => {
-                    // Handle errors specifically for file scanning
-                    console.error(`Error scanning file. Reason: ${err}`)
-                    onScanFailure(err); // Reuse the failure callback, which now handles file errors
-                });
-        }
-    });
+                // --- File Upload Logic ---
+                if (fileInput) {
+                     fileInput.addEventListener('change', e => {
+                         if (!html5QrCode) initializeQrCodeScanner(); if (!html5QrCode) return;
+                         if (e.target.files?.length) {
+                             if (isScanning) { stopScanning(); } // Stop camera if scanning
+                             clearResults();
+                             updateResult('Scanning file...', 'info');
+                             html5QrCode.scanFile(e.target.files[0], true) // true = show image during scan
+                                 .then(onScanSuccess)
+                                 .catch(onScanFailure); // Use updated failure handler
+                         } else { clearResults(); }
+                     });
+                } else { console.warn("File input element not found."); }
 
-    // --- Utility Functions ---
-    function clearResults() {
-         resultsElement.textContent = '';
-         resultsElement.classList.remove('text-green-600', 'dark:text-green-400', 'text-yellow-600', 'dark:text-yellow-400', 'text-red-600', 'dark:text-red-400');
-    }
+                // --- Utility ---
+                function clearResults() { updateResult('', 'clear'); }
 
-    // Add event listeners to camera buttons
-    startBtn.addEventListener('click', startScanning);
-    stopBtn.addEventListener('click', stopScanning);
+                // --- Init and Listeners ---
+                 document.addEventListener('DOMContentLoaded', () => {
+                     initializeQrCodeScanner(); // Try to initialize on load
+                     // Add listeners only if buttons exist
+                     if(startBtn) startBtn.addEventListener('click', startScanning);
+                     if(stopBtn) stopBtn.addEventListener('click', stopScanning);
+                 });
+                 // Clean up scanner when leaving the page
+                 window.addEventListener('beforeunload', () => { if (isScanning && html5QrCode) stopScanning(); });
 
-    // Optional: Clean up camera scanner when the page is unloaded
-    window.addEventListener('beforeunload', () => {
-        if (isScanning) {
-            stopScanning();
-        }
-    });
+            </script>
+        @endpush
+    @endif {{-- End @if(!isAdmin) for script push --}}
 
-    
-
-</script>
+</x-app-layout>

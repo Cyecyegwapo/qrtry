@@ -1,63 +1,71 @@
+<x-app-layout> 
 
     {{-- Header slot content --}}
     <x-slot name="header">
         <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
-            {{-- Display the title of the event for which attendance is being shown --}}
-            Attendance List for: {{ $event->title }}
+            {{-- Display the title of the event --}}
+            Attendance List for: <span class="italic">{{ $event->title }}</span>
         </h2>
     </x-slot>
 
     {{-- Main content area --}}
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-            <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg">
-                <div class="p-6 text-gray-900 dark:text-gray-100">
+            {{-- Card container --}}
+            <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-xl sm:rounded-lg">
+                <div class="p-6 sm:p-8 text-gray-900 dark:text-gray-100">
 
-                    {{-- Display the total count of attendees --}}
-                    <p class="mb-4"><strong>Total Attendees:</strong> {{ $attendees->count() }}</p>
+                    {{-- Top section with title and count --}}
+                    <div class="mb-6 pb-3 border-b border-gray-200 dark:border-gray-700">
+                        <h3 class="text-lg font-semibold leading-6 text-gray-900 dark:text-gray-100">
+                            Attendee Records
+                        </h3>
+                        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                            Total Attendees: <span class="font-bold">{{ $attendees->count() }}</span>
+                        </p>
+                    </div>
 
                     {{-- Table to display attendees --}}
-                    <div class="overflow-x-auto relative shadow-md sm:rounded-lg">
-                        <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
-                            <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+                    <div class="overflow-x-auto relative border border-gray-200 dark:border-gray-700 sm:rounded-lg">
+                        <table class="w-full text-sm text-left text-gray-600 dark:text-gray-400">
+                            {{-- Table Header --}}
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-100 dark:bg-gray-700 dark:text-gray-400">
                                 <tr>
-                                    {{-- Table header for Attendee Name --}}
                                     <th scope="col" class="py-3 px-6">
                                         Name
                                     </th>
-                                    {{-- Table header for Attendee Email --}}
                                     <th scope="col" class="py-3 px-6">
                                         Email
                                     </th>
-                                    {{-- Table header for Attendance Timestamp --}}
                                     <th scope="col" class="py-3 px-6">
-                                        Attended At
+                                        Attended At (Timestamp)
                                     </th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {{-- Loop through each attendee passed from the controller --}}
+                                {{-- Loop through attendees --}}
                                 @forelse($attendees as $attendee)
-                                    <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-                                        {{-- Attendee Name column --}}
+                                    {{-- Added alternating row colors for better readability --}}
+                                    <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600/50 odd:bg-white dark:odd:bg-gray-800 even:bg-gray-50 dark:even:bg-gray-700/50">
+                                        {{-- Attendee Name --}}
                                         <td class="py-4 px-6 font-medium text-gray-900 whitespace-nowrap dark:text-white">
                                             {{ $attendee->name }}
                                         </td>
-                                        {{-- Attendee Email column --}}
+                                        {{-- Attendee Email --}}
                                         <td class="py-4 px-6">
                                             {{ $attendee->email }}
                                         </td>
-                                        {{-- Attendance Timestamp column --}}
-                                        <td class="py-4 px-6">
-                                            {{-- Format the timestamp if it exists, otherwise display N/A --}}
-                                            {{ $attendee->attended_at ? \Carbon\Carbon::parse($attendee->attended_at)->format('Y-m-d H:i:s') : 'N/A' }}
+                                        {{-- Attendance Timestamp --}}
+                                        <td class="py-4 px-6 whitespace-nowrap">
+                                            {{-- More readable date/time format --}}
+                                            {{ $attendee->attended_at ? \Carbon\Carbon::parse($attendee->attended_at)->format('M j, Y g:i A') : 'N/A' }}
                                         </td>
                                     </tr>
                                 @empty
-                                    {{-- Message shown if there are no attendees --}}
+                                    {{-- Message if no attendees --}}
                                     <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
-                                        <td colspan="3" class="py-4 px-6 text-center text-gray-500 dark:text-gray-400">
-                                            No attendees recorded yet.
+                                        <td colspan="3" class="py-6 px-6 text-center text-gray-500 dark:text-gray-400 italic">
+                                            No attendees recorded yet for this event.
                                         </td>
                                     </tr>
                                 @endforelse
@@ -65,16 +73,16 @@
                         </table>
                     </div>
 
-                     {{-- Back Button --}}
-                     <div class="mt-6">
-                        {{-- Link back to the specific event's detail page --}}
-                        <a href="{{ route('events.show', $event->id) }}" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-200">
+                     {{-- Back Button (Styled Consistently) --}}
+                     <div class="mt-6 flex justify-start"> {{-- Aligned button left --}}
+                        <a href="{{ route('events.show', $event->id) }}"
+                           class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-semibold text-xs text-gray-700 dark:text-gray-300 uppercase tracking-widest shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 disabled:opacity-25 transition ease-in-out duration-150">
                             &larr; Back to Event Details
                         </a>
                      </div>
 
-                </div>
-            </div>
-        </div>
-    </div>
-
+                </div> {{-- End p-6 --}}
+            </div> {{-- End card --}}
+        </div> {{-- End max-w-7xl --}}
+    </div> {{-- End py-12 --}}
+</x-app-layout> 
