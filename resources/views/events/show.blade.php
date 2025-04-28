@@ -198,7 +198,6 @@
     @if(!auth()->user()?->isAdmin())
         @push('scripts')
             <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-            {{-- FULL JAVASCRIPT FOR SCANNER - Including previous fixes --}}
             <script>
                 // Pass PHP variables safely to JS
                 const currentPageEventId = @json($event->id);
