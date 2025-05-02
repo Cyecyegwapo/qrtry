@@ -89,7 +89,7 @@
                                          <div class="grid grid-cols-3 gap-2 py-1">
                                              <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Admin Status:</dt>
                                              <dd class="col-span-2">
-                                                 <span class="px-2 py-0.5 text-xs rounded-full {{ $event->qrcode->is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
+                                                 <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ $event->qrcode->is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
                                                      {{ $event->qrcode->is_active ? 'Enabled' : 'Disabled' }}
                                                  </span>
                                              </dd>
@@ -108,7 +108,7 @@
                                          <div class="grid grid-cols-3 gap-2 py-1 items-start">
                                              <dt class="col-span-1 font-medium text-gray-600 dark:text-gray-400">Currently Valid:</dt>
                                              <dd class="col-span-2">
-                                                  <span class="px-2 py-0.5 text-xs rounded-full {{ $event->qrcode->isValidNow() ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
+                                                  <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ $event->qrcode->isValidNow() ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }}">
                                                       {{ $event->qrcode->isValidNow() ? 'Yes' : 'No' }}
                                                   </span>
                                                   {{-- Reason if not valid --}}
@@ -116,9 +116,9 @@
                                                      <span class="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                                          (Reason:
                                                          @if(!$event->qrcode->is_active) Admin Disabled
-                                                         @elseif($event->qrcode->active_from && now()->lt($event->qrcode->active_from)) Not started
+                                                         @elseif($event->qrcode->active_from && now()->lt($event->qrcode->active_from)) Not started yet
                                                          @elseif($event->qrcode->active_until && now()->gt($event->qrcode->active_until)) Expired
-                                                         @else Unknown @endif)
+                                                         @else Other reason @endif)
                                                      </span>
                                                 @endif
                                              </dd>
@@ -196,202 +196,432 @@
     {{-- Push the Scanner JavaScript to the layout's script stack --}}
     {{-- Only include JS if the user is NOT an admin (they see the scanner) --}}
     @if(!auth()->user()?->isAdmin())
+        {{-- Prepare event data for JS --}}
+        @php
+            $eventStartDateTime = null;
+            // Ensure both date and time are set before trying to combine
+            if ($event->date && $event->time) {
+                try {
+                    $eventDate = ($event->date instanceof \Carbon\Carbon) ? $event->date : \Carbon\Carbon::parse($event->date);
+                    $timeParts = \Carbon\Carbon::parse($event->time);
+                    $combinedDateTime = $eventDate->copy()->setTime($timeParts->hour, $timeParts->minute, $timeParts->second);
+                    $eventStartDateTime = $combinedDateTime->toISOString();
+                } catch (\Exception $e) {
+                    // Use Illuminate\Support\Facades\Log; if not already imported
+                    \Log::error("Error parsing event date/time for QR validation: Event ID {$event->id}", ['exception' => $e]);
+                    $eventStartDateTime = null;
+                }
+            }
+
+            // Get QR code active status (default to false if QR code relationship doesn't exist or is_active is false)
+            $isQrCodeActive = $event->qrcode ? $event->qrcode->is_active : false;
+
+        @endphp
+
         @push('scripts')
+            {{-- Include the html5-qrcode library --}}
             <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
             <script>
                 // Pass PHP variables safely to JS
                 const currentPageEventId = @json($event->id);
-                const appBaseUrl = @json(rtrim(url('/'), '/')); // Get base URL and remove trailing slash
-                console.log('Base URL for Check:', appBaseUrl); // Verify this in console
+                const appBaseUrl = @json(rtrim(url('/'), '/'));
+                const eventStartDateTimeString = @json($eventStartDateTime); // ISO string or null
+                const isQrCodeActive = @json($isQrCodeActive); // Boolean (true/false)
 
-                // --- Common Variables and Functions ---
+                // Log variables for debugging
+                console.log('Base URL:', appBaseUrl);
+                console.log('Current Page Event ID:', currentPageEventId);
+                console.log('Event Start DateTime String:', eventStartDateTimeString);
+                console.log('QR Code Active Status:', isQrCodeActive);
+
+                // --- DOM Elements ---
                 const resultsElement = document.getElementById('qr-reader-results');
                 const qrReaderDiv = document.getElementById('qr-reader');
                 const fileInput = document.getElementById('qr-input-file');
                 const startBtn = document.getElementById('start-scan-btn');
                 const stopBtn = document.getElementById('stop-scan-btn');
-                let html5QrCode = null;
 
+                // --- Scanner State ---
+                let html5QrCode = null; // Instance of the scanner library
+                let isScanning = false; // Track if the camera is currently active
+
+                /**
+                 * Initializes the Html5Qrcode scanner instance.
+                 */
                 function initializeQrCodeScanner() {
-                    if (!html5QrCode && document.getElementById("qr-reader")) {
-                        try {
-                            html5QrCode = new Html5Qrcode("qr-reader");
-                        } catch (e) { console.error("Init Fail:", e); if(startBtn) startBtn.disabled = true; if(fileInput) fileInput.disabled = true; if(qrReaderDiv) qrReaderDiv.innerHTML = '<p class="text-red-500 p-4">Scanner Fail</p>';}
-                    } else if (!document.getElementById("qr-reader")) {
-                         console.error("QR Reader element not found");
-                         if(startBtn) startBtn.disabled = true; if(fileInput) fileInput.disabled = true;
+                    // Prevent re-initialization or initialization if the target div isn't found
+                    if (html5QrCode || !qrReaderDiv) return;
+                    try {
+                        html5QrCode = new Html5Qrcode("qr-reader");
+                        console.log("Html5Qrcode scanner initialized successfully.");
+                    } catch (e) {
+                        console.error("Html5Qrcode initialization failed:", e);
+                        // Disable scanning UI elements if initialization fails
+                        if(startBtn) startBtn.disabled = true;
+                        if(fileInput) fileInput.disabled = true;
+                        qrReaderDiv.innerHTML = '<p class="text-red-500 p-4">QR Scanner failed to load.</p>';
+                        updateResult("QR Scanner failed to load. Please refresh the page or contact support.", "error");
                     }
                 }
 
+                /**
+                 * Updates the results display area with a message and status type.
+                 * @param {string} message The message to display.
+                 * @param {'info'|'success'|'error'|'warning'|'clear'|'default'} [type='info'] The type of message (controls styling).
+                 */
                 function updateResult(message, type = 'info') {
-                     if (!resultsElement) return;
+                     if (!resultsElement) return; // Exit if results element not found
                      resultsElement.textContent = message;
-                     resultsElement.className = 'mt-6 text-center font-medium py-3 px-4 rounded-lg min-h-[50px] text-sm '; // Base
-                     // Clear old colors
-                    resultsElement.classList.remove(...['bg-green-100/50', 'dark:bg-green-900/50', 'text-green-700', 'dark:text-green-200', 'bg-red-100/50', 'dark:bg-red-900/50', 'text-red-700', 'dark:text-red-200', 'bg-yellow-100/50', 'dark:bg-yellow-900/50', 'text-yellow-700', 'dark:text-yellow-200', 'bg-blue-100/50', 'dark:bg-blue-900/50', 'text-blue-700', 'dark:text-blue-200', 'bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-300']);
-                     // Add new colors
-                     switch (type) {
-                         case 'success': resultsElement.classList.add('bg-green-100/50', 'dark:bg-green-900/50', 'text-green-700', 'dark:text-green-200'); break;
-                         case 'error': resultsElement.classList.add('bg-red-100/50', 'dark:bg-red-900/50', 'text-red-700', 'dark:text-red-200'); break;
-                         case 'warning': resultsElement.classList.add('bg-yellow-100/50', 'dark:bg-yellow-900/50', 'text-yellow-700', 'dark:text-yellow-200'); break;
-                         case 'info': resultsElement.classList.add('bg-blue-100/50', 'dark:bg-blue-900/50', 'text-blue-700', 'dark:text-blue-200'); break;
-                         case 'clear': resultsElement.textContent = ''; break;
-                         default: resultsElement.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-300'); break;
+                     // Define base classes (consistent padding, alignment, etc.)
+                     const baseClasses = ['mt-6', 'text-center', 'font-medium', 'py-3', 'px-4', 'rounded-lg', 'min-h-[50px]', 'text-sm'];
+                     resultsElement.className = baseClasses.join(' '); // Reset to base classes
+
+                     // Define Tailwind classes for each message type
+                     const typeClasses = {
+                         success: 'bg-green-100/50 dark:bg-green-900/50 text-green-700 dark:text-green-200',
+                         error:   'bg-red-100/50 dark:bg-red-900/50 text-red-700 dark:text-red-200',
+                         warning: 'bg-yellow-100/50 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-200',
+                         info:    'bg-blue-100/50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200',
+                         default: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                     };
+
+                     // Apply specific type classes, or default if type is unknown or 'clear'
+                     if (type !== 'clear' && typeClasses[type]) {
+                         resultsElement.classList.add(...typeClasses[type].split(' '));
+                     } else if (type !== 'clear') {
+                         resultsElement.classList.add(...typeClasses['default'].split(' '));
+                     }
+                     // Clear message content specifically for 'clear' type
+                     if (type === 'clear') {
+                         resultsElement.textContent = '';
                      }
                 }
 
-                // --- onScanSuccess with Stricter Validation (Using Regex Literal + startsWith) ---
-                 function onScanSuccess(decodedText, decodedResult) {
-                    console.log(`Scan Success: Code = ${decodedText}`, decodedResult);
-                    stopScanning(); // Stop camera if running
+                /**
+                 * Callback function executed when a QR code is successfully scanned (by camera or file).
+                 * Performs all validation checks before redirecting.
+                 * @param {string} decodedText The text decoded from the QR code (expected to be a URL).
+                 * @param {object} decodedResult Additional details from the scanner library.
+                 */
+                function onScanSuccess(decodedText, decodedResult) {
+                    console.log(`Scan Success Candidate: Code = ${decodedText}`, decodedResult);
+                    stopScanning(); // Stop camera scanning after a successful read
 
-                    // 1. Define the simple path pattern using a Regex Literal
-                    const pathPattern = /\/events\/(\d+)\/attendance\/record$/; // Checks the end part of the URL
+                    // --- Validation Chain ---
 
-                    // 2. Test the path pattern first
+                    // 1. QR Code Active Check: Is the QR code enabled in the admin settings?
+                    if (isQrCodeActive === false) {
+                        console.log("Validation Failed (Step 1): QR Code is disabled.");
+                        updateResult('Invalid QR: This QR code is currently disabled by the administrator.', 'error');
+                        return; // Halt validation
+                    }
+                    console.log("Validation Passed (Step 1): QR Code is active.");
+
+                    // 2. Format & Origin Check: Does the URL match the expected pattern and base URL?
+                    const pathPattern = /\/events\/(\d+)\/attendance\/record$/;
                     const match = decodedText.match(pathPattern);
 
-                    // 3. Check BOTH path pattern match AND if it starts with the correct base URL
-                    // Ensure appBaseUrl is defined and not empty before checking startsWith
-                    if (match && match[1] && appBaseUrl && decodedText.startsWith(appBaseUrl)) {
-                        // Pattern matched AND it's from our app URL
+                    if (!match || !match[1] || !appBaseUrl || !decodedText.startsWith(appBaseUrl)) {
+                        console.log("Validation Failed (Step 2): URL format or origin mismatch.", { decodedText, match, appBaseUrl, startsWithCheck: appBaseUrl ? decodedText.startsWith(appBaseUrl) : 'appBaseUrl_missing' });
+                        updateResult(`Invalid QR: Code does not match the expected format or origin.`, 'error');
+                        return; // Halt validation
+                    }
+                    const scannedEventId = parseInt(match[1], 10);
+                    console.log(`Validation Passed (Step 2): URL format and origin. Scanned Event ID: ${scannedEventId}`);
 
-                        const scannedEventId = parseInt(match[1], 10);
-                        console.log("Scanned Event ID:", scannedEventId);
-
-                        // 4. Check if the scanned Event ID matches the current page's Event ID
-                        if (scannedEventId === currentPageEventId) {
-                            updateResult('Valid attendance code found! Redirecting...', 'success');
-                            // Redirect to the scanned URL (which is validated)
-                            setTimeout(() => { window.location.href = decodedText; }, 500);
-                        } else {
-                            // Correct format & origin, but WRONG event ID
-                            updateResult(`Invalid QR: Code is for a different event.`, 'error');
-                            console.log(`Event ID mismatch: Scanned ${scannedEventId}, Expected ${currentPageEventId}`);
+                    // 3. Event Start Time Check: Has the event officially started? (Skip if no start time is set)
+                    if (eventStartDateTimeString) {
+                        try {
+                            const eventStartTime = new Date(eventStartDateTimeString);
+                            const now = new Date();
+                            if (now < eventStartTime) {
+                                console.log(`Validation Failed (Step 3): Event Start Time. Current time (${now.toISOString()}) is before event start (${eventStartTime.toISOString()})`);
+                                updateResult(`Invalid QR: This event has not started yet. Scanning begins at ${eventStartTime.toLocaleString()}.`, 'error');
+                                return; // Halt validation
+                            }
+                             console.log(`Validation Passed (Step 3): Event Start Time. Current time (${now.toISOString()}) is on or after event start (${eventStartTime.toISOString()})`);
+                        } catch (e) {
+                            console.error("JavaScript Error: Failed to parse event start date/time string:", eventStartDateTimeString, e);
+                            updateResult('Internal Error: Could not verify event start time. Please contact support.', 'error');
+                            return; // Halt validation due to parsing error
                         }
                     } else {
-                        // Either path didn't match OR it didn't start with appBaseUrl
-                        updateResult(`Invalid QR: Code does not match expected format or origin.`, 'error');
-                        if (!match) {
-                            console.log("Failed Path Pattern Match:", decodedText);
-                        } else if (!appBaseUrl || !decodedText.startsWith(appBaseUrl)) {
-                            console.log("Failed Origin Check:", decodedText, "Expected origin starting with:", appBaseUrl);
-                        }
+                         console.log("Validation Skipped (Step 3): Event start time is not set for this event.");
                     }
-                }
-                 // --- End of onScanSuccess ---
 
+                    // 4. Event ID Match Check: Does the event ID in the QR code match this page's event ID?
+                    if (scannedEventId !== currentPageEventId) {
+                        console.log(`Validation Failed (Step 4): Event ID mismatch. Scanned: ${scannedEventId}, Expected: ${currentPageEventId}`);
+                        updateResult(`Invalid QR: This code is for a different event (Expected: ${currentPageEventId}, Scanned: ${scannedEventId}).`, 'error');
+                        return; // Halt validation
+                    }
+                    console.log("Validation Passed (Step 4): Event ID Match.");
+
+                    // --- All Validations Passed ---
+                    console.log("All validations successful. Preparing to redirect...");
+                    updateResult('Valid attendance code found! Redirecting now...', 'success');
+                    // Redirect to the validated attendance recording URL
+                    setTimeout(() => {
+                        window.location.href = decodedText;
+                    }, 500); // Brief delay so user sees the success message
+
+                }
+
+                /**
+                 * Callback function executed when the scanner fails to decode a QR code.
+                 * Used primarily for file scan errors, less so for continuous camera scanning.
+                 * @param {Error|string} error The error object or message from the library.
+                 */
                 function onScanFailure(error) {
-                     if (error && fileInput && fileInput.value) {
-                         let errorMessage = "Could not scan from file.";
-                         if (error instanceof Error) { errorMessage = `Error scanning file: ${error.message || error}`; }
-                         else if (typeof error === 'string') { errorMessage = error.toLowerCase().includes('no qr code found') ? `No QR code found.` : `Error: ${error}`; }
+                     // Show specific errors for file scans, as they are user-initiated actions
+                     if (fileInput && fileInput.files && fileInput.files.length > 0) {
+                         let errorMessage = "Could not scan QR code from the selected file.";
+                         if (error instanceof Error) {
+                             errorMessage = `Error scanning file: ${error.message || 'Unknown error'}`;
+                         } else if (typeof error === 'string') {
+                             // Try to provide a more user-friendly message for common library errors
+                             errorMessage = error.toLowerCase().includes('no qr code found')
+                               ? `No QR code was found in the image.`
+                               : `Error scanning file: ${error}`;
+                         }
+                         console.error("File Scan Failure:", error);
                          updateResult(errorMessage, 'error');
-                         fileInput.value = '';
+                     } else {
+                         // Ignore continuous "No QR code found" messages from the camera stream to avoid spamming logs/UI
+                         if (!(typeof error === 'string' && error.toLowerCase().includes('no qr code found'))) {
+                             console.warn(`Camera Scan Issue (non-blocking): ${error}`);
+                             // Avoid updating the main result display for minor camera issues
+                         }
                      }
-                     // Avoid logging continuous "No QR code found" errors from camera unless debugging
-                     if (!(typeof error === 'string' && error.includes('No QR code found'))) { console.warn(`Scan Fail: ${error}`); }
-                }
+                 }
 
-                // --- Live Camera Logic ---
-                let isScanning = false;
+
+                /**
+                 * Starts the camera scanning process.
+                 */
                 function startScanning() {
-                    if (isScanning || !html5QrCode) return;
-                    clearResults();
-                    qrReaderDiv.innerHTML = ''; // Clear placeholder
+                    if (isScanning || !html5QrCode) {
+                         console.log("Scan start prevented: Already scanning or scanner not initialized.");
+                         return;
+                    }
+                    clearResults(); // Clear any previous results
+                    qrReaderDiv.innerHTML = ''; // Clear placeholder text/video
                     updateResult('Initializing camera...', 'info');
-                    qrReaderDiv.classList.remove('items-center', 'justify-center'); // Allow video placement
+                    qrReaderDiv.classList.remove('items-center', 'justify-center'); // Allow video element to fill space
+
                     Html5Qrcode.getCameras().then(devices => {
-                        if (devices && devices.length) {
-                           // Try to find back camera first, fallback to first camera
-                           const camId = devices.find(d=>d.label.toLowerCase().includes('back'))?.id || devices[0].id;
-                           console.log(`Using camera: ${camId}`);
-                           // Function to calculate qrbox size dynamically
-                           const qrboxFunction = (viewfinderWidth, viewfinderHeight) => {
-                                let minEdgePercentage = 0.7; // Use 70% of the smaller edge
+                        if (!devices || !devices.length) {
+                           throw new Error('No cameras found on this device.'); // Throw error to be caught by handleCameraError
+                        }
+                        // Prefer back camera if available based on label heuristics
+                        const preferredCamera = devices.find(d => d.label.toLowerCase().includes('back'));
+                        const cameraId = preferredCamera ? preferredCamera.id : devices[0].id; // Fallback to the first camera
+                        console.log(`Attempting to use camera: ${cameraId} (${preferredCamera?.label || devices[0].label})`);
+
+                        // Configuration for the scanner
+                        const config = {
+                            fps: 10, // Target frames per second for scanning
+                            qrbox: (viewfinderWidth, viewfinderHeight) => { // Dynamic QR box sizing
+                                let minEdgePercentage = 0.7;
                                 let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
                                 let qrboxSize = Math.floor(minEdgeSize * minEdgePercentage);
+                                // Clamp the size to reasonable limits
+                                qrboxSize = Math.max(100, Math.min(qrboxSize, viewfinderWidth, viewfinderHeight));
                                 return { width: qrboxSize, height: qrboxSize };
-                            };
-                           const config = { fps: 10, qrbox: qrboxFunction, rememberLastUsedCamera: false, supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] };
-                           html5QrCode.start(camId, config, onScanSuccess, onScanFailure)
-                            .then(() => {
-                                console.log("Scanner started successfully.");
-                                isScanning = true;
-                                if(startBtn) startBtn.style.display = 'none';
-                                if(stopBtn) stopBtn.style.display = 'inline-flex';
-                                updateResult('Scanning... Point camera at QR code.', 'info');
-                             })
-                            .catch(handleCameraError);
-                        } else { handleCameraError('No cameras found.'); }
-                    }).catch(handleCameraError);
+                            },
+                            rememberLastUsedCamera: false, // Don't persist camera choice across sessions
+                            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA], // Explicitly use camera scan type
+                            aspectRatio: 1.0 // Attempt square aspect ratio
+                        };
+
+                        // Start the scanner
+                        return html5QrCode.start(cameraId, config, onScanSuccess, onScanFailure);
+
+                    }).then(() => {
+                        // This .then() executes after html5QrCode.start resolves successfully
+                        console.log("Camera scanner started successfully.");
+                        isScanning = true;
+                        if(startBtn) startBtn.style.display = 'none'; // Hide Start button
+                        if(stopBtn) stopBtn.style.display = 'inline-flex'; // Show Stop button
+                        updateResult('Scanning... Point camera at QR code.', 'info'); // Update status message
+                    }).catch(handleCameraError); // Catch errors from getCameras() or html5QrCode.start()
                 }
+
+                /**
+                 * Stops the active camera scanning process.
+                 */
                 function stopScanning() {
-                     if (!html5QrCode || !html5QrCode.isScanning) { // Check if scanning before trying to stop
-                        console.log("Stop requested but scanner not active.");
+                    // Exit if scanner isn't active or initialized
+                    if (!html5QrCode || !isScanning) {
+                        console.log("Stop requested but scanner not active or not initialized.");
                         isScanning = false; // Ensure state is correct
+                        // Update UI just in case it's inconsistent
                         if(startBtn) startBtn.style.display = 'inline-flex';
                         if(stopBtn) stopBtn.style.display = 'none';
-                        // Ensure placeholder is shown if div is empty
-                        if (qrReaderDiv && !qrReaderDiv.querySelector('video') && !qrReaderDiv.querySelector('canvas')) {
-                            qrReaderDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>';
+                        // Restore placeholder if needed
+                        if (qrReaderDiv && qrReaderDiv.innerHTML.trim() === '') {
+                            qrReaderDiv.innerHTML = '<p class="text-gray-400 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>';
                             qrReaderDiv.classList.add('items-center', 'justify-center');
                         }
                         return;
                     }
-                     // Attempt to stop, handle potential errors, always update UI state
-                     html5QrCode.stop().then(()=> console.log("Scanner stopped.")).catch(err => console.error("Stop fail:", err))
-                     .finally(() => {
-                         isScanning = false;
-                         if(startBtn) startBtn.style.display = 'inline-flex';
-                         if(stopBtn) stopBtn.style.display = 'none';
-                         if(qrReaderDiv) {
-                             qrReaderDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>'; // Reset placeholder
-                             qrReaderDiv.classList.add('items-center', 'justify-center');
-                         }
-                         updateResult('Scanner stopped.', 'info');
-                     });
+
+                    console.log("Attempting to stop camera scanner...");
+                    try {
+                        // html5QrCode.stop() returns a Promise
+                        html5QrCode.stop()
+                            .then(() => {
+                                console.log("Camera scanner stopped successfully (Promise resolved).");
+                                // UI updates are handled in the finally block
+                            })
+                            .catch(err => {
+                                console.error("Error occurred while stopping camera scanner (Promise rejected):", err);
+                                // UI updates will still happen in finally
+                            })
+                            .finally(() => {
+                                console.log("Executing finally block after stop attempt.");
+                                isScanning = false; // Update state regardless of success/error
+                                // Update button visibility
+                                if(startBtn) startBtn.style.display = 'inline-flex';
+                                if(stopBtn) stopBtn.style.display = 'none';
+                                // Reset the QR reader div content
+                                if(qrReaderDiv) {
+                                    qrReaderDiv.innerHTML = '<p class="text-gray-400 dark:text-gray-500 text-sm p-4">Camera view stopped.</p>';
+                                    qrReaderDiv.classList.add('items-center', 'justify-center');
+                                }
+                                // Update the results message if it was showing a scanning/initializing state
+                                if(resultsElement && (resultsElement.textContent.startsWith('Scanning...') || resultsElement.textContent.startsWith('Initializing...'))) {
+                                   updateResult('Scanner stopped.', 'info');
+                                }
+                            });
+                    } catch (syncError) {
+                        // Catch potential synchronous errors from calling .stop() itself
+                        console.error("Synchronous error calling html5QrCode.stop():", syncError);
+                        // Force state update and UI reset in case the promise/finally doesn't run
+                        isScanning = false;
+                        if(startBtn) startBtn.style.display = 'inline-flex';
+                        if(stopBtn) stopBtn.style.display = 'none';
+                        if(qrReaderDiv) { // Ensure UI reset happens
+                           qrReaderDiv.innerHTML = '<p class="text-gray-400 dark:text-gray-500 text-sm p-4">Camera view stopped (error).</p>';
+                           qrReaderDiv.classList.add('items-center', 'justify-center');
+                        }
+                    }
                 }
-                 function handleCameraError(err) {
-                     console.error("Cam Error:", err); let msg = 'Camera error. ';
-                     if (err instanceof Error) { msg += err.message; } else if(typeof err === 'string'){ msg += err; }
-                     updateResult(msg, 'error');
-                     isScanning = false; // Reset state
-                     if(startBtn) startBtn.style.display = 'inline-flex';
+
+                /**
+                 * Handles critical errors during camera initialization or starting.
+                 * @param {Error|string} err The error object or message.
+                 */
+                function handleCameraError(err) {
+                     console.error("Camera Start/Initialization Error:", err);
+                     let userMessage = 'Camera Error: ';
+                     // Provide more specific feedback based on common error types
+                     if (err instanceof Error) {
+                         switch (err.name) {
+                             case 'NotAllowedError': userMessage += 'Permission denied. Please allow camera access in browser settings.'; break;
+                             case 'NotFoundError': userMessage += 'Camera not found or unavailable.'; break;
+                             case 'NotReadableError': userMessage += 'Camera is already in use or a hardware error occurred.'; break;
+                             case 'OverconstrainedError': userMessage += 'Camera does not meet requested constraints.'; break;
+                             case 'TypeError': userMessage += 'Invalid configuration or device issue.'; break;
+                             default: userMessage += err.message || 'Could not start the camera.';
+                         }
+                     } else if (typeof err === 'string') {
+                         userMessage += err; // Use the string error directly
+                     } else {
+                         userMessage += 'An unknown error occurred.';
+                     }
+
+                     updateResult(userMessage, 'error'); // Show error in results area
+                     isScanning = false; // Ensure scanning state is false
+                     // Update button states
+                     if(startBtn) { startBtn.style.display = 'inline-flex'; startBtn.disabled = false; } // Re-enable Start button
                      if(stopBtn) stopBtn.style.display = 'none';
-                     if(qrReaderDiv) { // Show error in reader div
-                         qrReaderDiv.innerHTML = `<p class="text-red-500 dark:text-red-300 p-4 text-sm font-medium">Camera Error</p>`;
+                     // Update the QR reader div itself to show the error
+                     if(qrReaderDiv) {
+                         qrReaderDiv.innerHTML = `<p class="text-red-500 dark:text-red-300 p-4 text-sm font-medium">${userMessage}</p>`;
                          qrReaderDiv.classList.add('items-center', 'justify-center');
                      }
                  }
 
-                // --- File Upload Logic ---
-                if (fileInput) {
-                     fileInput.addEventListener('change', e => {
-                         if (!html5QrCode) initializeQrCodeScanner(); if (!html5QrCode) return;
-                         if (e.target.files?.length) {
-                             if (isScanning) { stopScanning(); } // Stop camera if scanning
-                             clearResults();
-                             updateResult('Scanning file...', 'info');
-                             html5QrCode.scanFile(e.target.files[0], true) // true = show image during scan
-                                 .then(onScanSuccess)
-                                 .catch(onScanFailure); // Use updated failure handler
-                         } else { clearResults(); }
-                     });
-                } else { console.warn("File input element not found."); }
+                /**
+                 * Attaches event listener to the file input for scanning uploaded images.
+                 */
+                function setupFileInputListener() {
+                    if (!fileInput) {
+                        console.warn("File input element 'qr-input-file' not found. File scanning disabled.");
+                        return;
+                    }
+                    fileInput.addEventListener('change', (e) => {
+                        // Ensure scanner is initialized
+                        if (!html5QrCode) {
+                            initializeQrCodeScanner();
+                            if (!html5QrCode) { // Check again if initialization failed
+                                updateResult("Scanner is not ready. Cannot scan file.", 'error');
+                                e.target.value = null; // Reset file input
+                                return;
+                            }
+                        }
 
-                // --- Utility ---
-                function clearResults() { updateResult('', 'clear'); }
+                        // Check if a file was actually selected
+                        if (e.target.files && e.target.files.length > 0) {
+                            const file = e.target.files[0];
+                            console.log(`File selected: ${file.name}`);
+                            // Stop camera scanning if it's active
+                            if (isScanning) {
+                                stopScanning();
+                            }
+                            clearResults(); // Clear previous results
+                            updateResult(`Scanning image: ${file.name}...`, 'info');
 
-                // --- Init and Listeners ---
+                            // Scan the selected file
+                            html5QrCode.scanFile(file, /* showImage= */ true) // showImage=true renders image in reader div
+                                .then(onScanSuccess) // Use the same success handler
+                                .catch(onScanFailure); // Use the same failure handler
+                        } else {
+                            console.log("File selection cancelled or no file chosen.");
+                            clearResults(); // Clear results if selection is cancelled
+                        }
+                        // Reset the input value. This allows selecting the same file again
+                        // immediately after a scan attempt (success or failure).
+                        e.target.value = null;
+                    });
+                }
+
+                /**
+                 * Clears the content and styling of the results display area.
+                 */
+                function clearResults() {
+                    updateResult('', 'clear');
+                }
+
+                // --- Initialization and Event Listeners ---
                  document.addEventListener('DOMContentLoaded', () => {
-                     initializeQrCodeScanner(); // Try to initialize on load
-                     // Add listeners only if buttons exist
-                     if(startBtn) startBtn.addEventListener('click', startScanning);
-                     if(stopBtn) stopBtn.addEventListener('click', stopScanning);
+                     console.log("DOM Content Loaded. Initializing scanner and listeners.");
+                     initializeQrCodeScanner(); // Initialize the scanner library instance
+                     setupFileInputListener(); // Set up the listener for file uploads
+
+                     // Add click listeners for Start/Stop buttons if they exist
+                     if (startBtn) {
+                        startBtn.addEventListener('click', startScanning);
+                     } else {
+                        console.warn("Start Scan button ('start-scan-btn') not found.");
+                     }
+                     if (stopBtn) {
+                        stopBtn.addEventListener('click', stopScanning);
+                     } else {
+                        console.warn("Stop Scan button ('stop-scan-btn') not found.");
+                     }
                  });
-                 // Clean up scanner when leaving the page
-                 window.addEventListener('beforeunload', () => { if (isScanning && html5QrCode) stopScanning(); });
+
+                 // Add cleanup logic for when the user navigates away from the page
+                 window.addEventListener('beforeunload', () => {
+                    if (isScanning && html5QrCode) {
+                        console.log("Page unloading. Stopping active scanner.");
+                        // Attempt to stop the scanner gracefully. Errors here are usually ignored by the browser.
+                        try { html5QrCode.stop(); } catch(e) { console.warn("Ignoring error during scanner stop on page unload:", e); }
+                    }
+                 });
 
             </script>
         @endpush
