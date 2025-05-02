@@ -109,8 +109,26 @@
                             @enderror
                         </div>
 
+                        {{-- +++ NEW FEATURE: Enable QR Code Checkbox +++ --}}
+                        <div class="block pt-2"> {{-- Added padding-top for spacing --}}
+                            <label for="enable_qr_code" class="inline-flex items-center cursor-pointer">
+                                <input id="enable_qr_code" type="checkbox"
+                                       class="rounded dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-indigo-600 shadow-sm focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:focus:ring-offset-gray-800"
+                                       name="enable_qr_code" value="1" {{ old('enable_qr_code') ? 'checked' : '' }}> {{-- Maintain state on validation failure --}}
+                                <span class="ms-2 text-sm text-gray-600 dark:text-gray-400">{{ __('Enable QR Code scanning immediately') }}</span>
+                            </label>
+                            {{-- Display potential validation error (optional for checkbox, but good practice) --}}
+                            @error('enable_qr_code')
+                                <p class="mt-1 text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
+                            @enderror
+                            {{-- Helper text for clarity --}}
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-500">If unchecked, the QR code will be generated but disabled. You can enable it later from the event details page.</p>
+                        </div>
+                        {{-- +++ END NEW FEATURE +++ --}}
+
+
                         {{-- Action Buttons --}}
-                        <div class="flex items-center justify-end pt-4 space-x-4"> {{-- Align buttons right, add space --}}
+                        <div class="flex items-center justify-end pt-4 space-x-4 border-t border-gray-200 dark:border-gray-700 mt-6"> {{-- Added border-top and margin-top --}}
                             {{-- Cancel Button --}}
                              <a href="{{ route('events.index') }}" class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-semibold text-xs text-gray-700 dark:text-gray-300 uppercase tracking-widest shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 disabled:opacity-25 transition ease-in-out duration-150">
                                 Cancel
